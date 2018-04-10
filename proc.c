@@ -154,6 +154,10 @@ userinit(void)
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
 
+  for(int i = 0; i<32 ; i++){
+    p->signals_handlers[i] = SIG_DFL;
+  }
+
   // this assignment to p->state lets other cores
   // run this process. the acquire forces the above
   // writes to be visible, and the lock is also needed
@@ -223,6 +227,11 @@ fork(void)
   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
 
   pid = np->pid;
+
+  np->signals_mask = curproc->signals_mask;
+  for(int i =0; i<32 ;i++){
+    np->signals_handlers[i] = curproc->signals_handlers[i]; 
+  }
 
   acquire(&ptable.lock);
 
@@ -488,20 +497,53 @@ wakeup(void *chan)
 // Kill the process with the given pid.
 // Process won't exit until it returns
 // to user space (see trap in trap.c).
+// int
+// kill(int pid)
+// {
+//   struct proc *p;
+
+//   acquire(&ptable.lock);
+//   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+//     if(p->pid == pid){
+//       p->killed = 1;
+//       // Wake process from sleep if necessary.
+//       if(p->state == SLEEPING)
+//         p->state = RUNNABLE;
+//       release(&ptable.lock);
+//       return 0;
+//     }
+//   }
+//   release(&ptable.lock);
+//   return -1;
+// }
+
+
 int
-kill(int pid)
+kill(int pid, int signum)
 {
   struct proc *p;
 
   acquire(&ptable.lock);
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->pid == pid){
-      p->killed = 1;
-      // Wake process from sleep if necessary.
-      if(p->state == SLEEPING)
-        p->state = RUNNABLE;
-      release(&ptable.lock);
-      return 0;
+      if(signum == SIGKILL){
+        p->killed = 1;
+        // Wake process from sleep if necessary.
+        if(p->state == SLEEPING)
+          p->state = RUNNABLE;
+        release(&ptable.lock);
+        return 0;
+      }
+      else if(signum == SIGSTOP){
+          // sigh some how that the process got sigstop with out adding to pending!
+          // should get time from sched and check for sigcont
+      }
+      else if(signum == SIGCONT){
+          // check somehow if had sig stop - if it did add it to pending signals else do nothing
+      }
+      else{
+
+      }
     }
   }
   release(&ptable.lock);
@@ -543,4 +585,30 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+
+uint
+sigprocmask(uint sigmask){
+  struct proc*  currproc;
+  uint old_mask;
+  currproc = myproc();
+  old_mask = currproc->signals_mask;
+  currproc->signals_mask = sigmask;
+  return old_mask;
+}
+
+sighandler_t 
+signal(int signum, sighandler_t handler){
+  struct proc* currproc;
+  sighandler_t old_handler;
+  currproc = myproc();
+  old_handler = currproc->signals_handlers[signum];
+  currproc->signals_handlers[signum] = handler;
+  return old_handler;
+}
+
+void
+sigret(void){
+  //TODO: implement!!!!!!! 
 }

@@ -26,14 +26,27 @@ sys_wait(void)
   return wait();
 }
 
+// int
+// sys_kill(void)
+// {
+//   int pid;
+
+//   if(argint(0, &pid) < 0)
+//     return -1;
+//   return kill(pid);
+// }
+
 int
 sys_kill(void)
 {
   int pid;
+  int signum;
 
-  if(argint(0, &pid) < 0)
+  if(argint(0, &pid) < 0 && argint(1, &signum) < 0)
     return -1;
-  return kill(pid);
+  if(signum >= 32 || signum < 0)
+    return -1;
+  return kill(pid, signum);
 }
 
 int
@@ -88,4 +101,34 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+int
+sys_sigprocmask(void)
+{
+  int sigmask;
+  if(argint(0, &sigmask) < 0)
+    return -1;
+  return sigprocmask((uint)sigmask);
+}
+
+
+int 
+sys_signal(void){
+  int signum;
+  sighandler_t handler;
+  //TOOD: check if more constraints needed here
+  if(argint(0, &signum) < 0 && argptr(1, (void*)&handler, sizeof(handler)) < 0)
+    return -1;
+
+  if(signum >= 32 || signum < 0)
+    return -1;
+
+  return (int)signal(signum, handler);
+}
+
+int
+sys_sigret(void){
+  sigret();
+  return 0;
 }
