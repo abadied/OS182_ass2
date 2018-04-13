@@ -114,6 +114,13 @@ found:
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
 
+  p->pend_signals = 0;
+  p->signals_mask = 0;
+  for(int i = 0; i<32 ; i++){
+    p->signals_handlers = (void*)SIG_DFL;
+  } 
+  p->stopped = 0;
+
   // Set up new context to start executing at forkret,
   // which returns to trapret.
   sp -= 4;
@@ -357,6 +364,20 @@ scheduler(void)
       if(p->state != RUNNABLE)
         continue;
 
+      if(p->stopped != 0){
+        if(p->pend_signals & (2 << SIGCONT)){
+          p->stopped = 0;
+          p->pend_signals = p->pend_signals ^ (2 << SIGCONT);
+        }
+        else{
+          continue;
+        }
+      }
+
+      if(p->pend_signals != 0){
+        // hndl
+
+      }
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
@@ -537,6 +558,7 @@ kill(int pid, int signum)
       else if(signum == SIGSTOP){
           // sigh some how that the process got sigstop with out adding to pending!
           // should get time from sched and check for sigcont
+
       }
       else if(signum == SIGCONT){
           // check somehow if had sig stop - if it did add it to pending signals else do nothing

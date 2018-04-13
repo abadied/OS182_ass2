@@ -59,6 +59,7 @@ struct proc {
   uint signals_mask;
   void* signals_handlers[32];
   struct trapframe* user_tf_backup;
+  int stopped;
 
 };
 
