@@ -23,6 +23,9 @@ alltraps:
   # Return falls through to trapret...
 .globl trapret
 trapret:
+  pushl %esp
+  call handle_signal
+  addl $4, %esp
   popal
   popl %gs
   popl %fs
@@ -30,3 +33,11 @@ trapret:
   popl %ds
   addl $0x8, %esp  # trapno and errcode
   iret
+
+
+.globl start_sigret
+.globl end_sigret
+start_sigret:
+  movl $24, %eax
+  int $64
+end_sigret:

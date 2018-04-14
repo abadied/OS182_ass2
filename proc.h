@@ -1,3 +1,5 @@
+#include "x86.h"
+
 #define SIG_DFL     0
 #define SIG_IGN     1
 #define SIGKILL      9
@@ -58,9 +60,8 @@ struct proc {
   uint pend_signals;
   uint signals_mask;
   void* signals_handlers[32];
-  struct trapframe* user_tf_backup;
+  struct trapframe user_tf_backup;
   int stopped;
-
 };
 
 

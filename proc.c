@@ -17,7 +17,8 @@ static struct proc *initproc;
 int nextpid = 1;
 extern void forkret(void);
 extern void trapret(void);
-
+extern void start_sigret(void);
+extern void end_sigret(void);
 static void wakeup1(void *chan);
 
 void
@@ -117,7 +118,7 @@ found:
   p->pend_signals = 0;
   p->signals_mask = 0;
   for(int i = 0; i<32 ; i++){
-    p->signals_handlers = (void*)SIG_DFL;
+    p->signals_handlers[i] = (void*)SIG_DFL;
   } 
   p->stopped = 0;
 
@@ -364,20 +365,6 @@ scheduler(void)
       if(p->state != RUNNABLE)
         continue;
 
-      if(p->stopped != 0){
-        if(p->pend_signals & (2 << SIGCONT)){
-          p->stopped = 0;
-          p->pend_signals = p->pend_signals ^ (2 << SIGCONT);
-        }
-        else{
-          continue;
-        }
-      }
-
-      if(p->pend_signals != 0){
-        // hndl
-
-      }
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
@@ -552,20 +539,20 @@ kill(int pid, int signum)
         // Wake process from sleep if necessary.
         if(p->state == SLEEPING)
           p->state = RUNNABLE;
-        release(&ptable.lock);
-        return 0;
       }
       else if(signum == SIGSTOP){
-          // sigh some how that the process got sigstop with out adding to pending!
-          // should get time from sched and check for sigcont
-
+        p->stopped = 1;
       }
       else if(signum == SIGCONT){
-          // check somehow if had sig stop - if it did add it to pending signals else do nothing
+        if(p->stopped != 0){
+          p->pend_signals = p->pend_signals | (2 << SIGCONT);
+        }
       }
       else{
-
+        p->pend_signals = p->pend_signals | (2 << signum);
       }
+      release(&ptable.lock);
+      return 0;
     }
   }
   release(&ptable.lock);
@@ -631,6 +618,69 @@ signal(int signum, sighandler_t handler){
 }
 
 void
+handle_signal(struct trapframe* tf){
+  struct proc* p;
+  if ((p=myproc()) == 0){
+    return;
+  }
+
+  while(p->stopped != 0){
+    if(p->pend_signals & (2 << SIGCONT)){
+      p->stopped = 0;
+      p->pend_signals = p->pend_signals ^ (2 << SIGCONT);
+    }
+    else{
+      yield();
+    }
+  }
+
+  if(p->pend_signals != 0){
+    int sig = -1;
+    for(int i = 0; i < 32; i++){
+      if((p->pend_signals & (2 << i)) != 0){
+        if ((int)p->signals_handlers[i] == SIG_IGN){
+          p->pend_signals = p->pend_signals ^ (2 << i);
+          continue;
+        }
+        sig = i;
+        break;
+      }
+    }
+
+    if(sig < 0)
+      return;
+
+    void* sig_handler = p->signals_handlers[sig];
+    if ((int)sig_handler == SIG_DFL){
+      kill(p->pid, SIGKILL);
+    }
+    else{
+      p->user_tf_backup = *tf;
+      uint size = (uint)((&end_sigret) - (&start_sigret));
+      p->tf->esp -= size;
+      uint backup_esp = p->tf->esp;
+
+      memmove((void*)(p->tf->esp), start_sigret, size);
+
+      p->tf->esp -= 4;
+      *((int*)(p->tf->esp)) = backup_esp;
+
+      p->tf->eip = (uint)sig_handler;
+
+      p->pend_signals = p->pend_signals ^ (2 << sig);
+    }
+  }
+  return;
+}
+
+void
 sigret(void){
-  //TODO: implement!!!!!!! 
+  struct proc* p;
+
+  if((p=myproc()) == 0)
+    return;
+
+  *(p->tf) = p->user_tf_backup;
+
+  return;
 }
