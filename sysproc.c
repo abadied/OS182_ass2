@@ -122,7 +122,7 @@ sys_signal(void){
   //TOOD: check if more constraints needed here
   if(argint(0, &signum) < 0)
     return -1;
-  if(argptr(1, (void*)&handler, sizeof(handler)) < 0)
+  if(argint(1, (int*)&handler) < 0)
     return -1;
 
   if(signum >= 32 || signum < 0)

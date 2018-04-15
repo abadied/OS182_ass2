@@ -121,6 +121,7 @@ found:
     p->signals_handlers[i] = (void*)SIG_DFL;
   } 
   p->stopped = 0;
+  p->handling_signal = 0;
 
   // Set up new context to start executing at forkret,
   // which returns to trapret.
@@ -627,48 +628,59 @@ handle_signal(struct trapframe* tf){
   while(p->stopped != 0){
     if(p->pend_signals & (2 << SIGCONT)){
       p->stopped = 0;
+      acquire(&ptable.lock);
       p->pend_signals = p->pend_signals ^ (2 << SIGCONT);
+      release(&ptable.lock);
     }
     else{
       yield();
     }
   }
 
-  if(p->pend_signals != 0){
+  if(p->pend_signals != 0 && p->handling_signal == 0){
     int sig = -1;
     for(int i = 0; i < 32; i++){
       if((p->pend_signals & (2 << i)) != 0){
         if ((int)p->signals_handlers[i] == SIG_IGN){
+          acquire(&ptable.lock);
           p->pend_signals = p->pend_signals ^ (2 << i);
+          release(&ptable.lock);
           continue;
         }
         sig = i;
         break;
       }
     }
-
     if(sig < 0)
       return;
+
+    acquire(&ptable.lock);
+    p->pend_signals = p->pend_signals ^ (2 << sig);
+    p->handling_signal = 1;
+    release(&ptable.lock);
 
     void* sig_handler = p->signals_handlers[sig];
     if ((int)sig_handler == SIG_DFL){
       kill(p->pid, SIGKILL);
     }
     else{
-      p->user_tf_backup = *tf;
+      p->user_tf_backup = *(p->tf);
+
       uint size = (uint)((&end_sigret) - (&start_sigret));
       p->tf->esp -= size;
-      uint backup_esp = p->tf->esp;
+      uint func_ptr = p->tf->esp;
 
       memmove((void*)(p->tf->esp), start_sigret, size);
 
       p->tf->esp -= 4;
-      *((int*)(p->tf->esp)) = backup_esp;
+      *((int*)(p->tf->esp)) = sig;
+
+      p->tf->esp -= 4;
+      *((int*)(p->tf->esp)) = func_ptr;
 
       p->tf->eip = (uint)sig_handler;
-
-      p->pend_signals = p->pend_signals ^ (2 << sig);
     }
+    
   }
   return;
 }
@@ -678,9 +690,10 @@ sigret(void){
   struct proc* p;
 
   if((p=myproc()) == 0)
-    return;
+    panic("should not be here");
 
   *(p->tf) = p->user_tf_backup;
+  p->handling_signal = 0;
 
   return;
 }
