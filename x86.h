@@ -147,6 +147,22 @@ lcr3(uint val)
   asm volatile("movl %0,%%cr3" : : "r" (val));
 }
 
+static inline int 
+cas(volatile void *addr, int expected, int newval){
+  int swaped = 1;
+  asm volatile(
+    "lock; \n\t"
+    "cmpxchgl %3, (%2) \n\t" /** check if the value inside addr is equal to (%3) expected **/
+    "jz swap_succeed \n\t" /** if equa jump to swaped else continue **/
+    "movl $0, %0 \n\t" /** swape failed so move 0 to swaped **/
+    "swap_succeed: \n\t"
+    : "=m"(swaped)
+    : "a"(expected), "r"(addr), "r"(newval)
+    : "memory" /** tell the compiler not to update dynamiclly and update emory values **/
+    );
+  return swaped;
+}
+
 //PAGEBREAK: 36
 // Layout of the trap frame built on the stack by the
 // hardware and by trapasm.S, and passed to trap().

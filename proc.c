@@ -70,10 +70,12 @@ myproc(void) {
 int 
 allocpid(void) 
 {
+  pushcli();
   int pid;
-  acquire(&ptable.lock);
-  pid = nextpid++;
-  release(&ptable.lock);
+  do{
+    pid = nextpid;
+   } while(!cas(&nextpid, pid, pid + 1));
+  popcli();
   return pid;
 }
 
@@ -89,18 +91,18 @@ allocproc(void)
   struct proc *p;
   char *sp;
 
-  acquire(&ptable.lock);
+  pushcli();
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == UNUSED)
+    if(cas(&p->state, UNUSED, EMBRYO))
       goto found;
 
-  release(&ptable.lock);
+  popcli();
+
   return 0;
 
 found:
-  p->state = EMBRYO;
-  release(&ptable.lock);
+  popcli();
   p->pid = allocpid();
 
 
@@ -640,7 +642,7 @@ handle_signal(struct trapframe* tf){
   if(p->pend_signals != 0 && p->handling_signal == 0){
     int sig = -1;
     for(int i = 0; i < 32; i++){
-      if((p->pend_signals & (2 << i)) != 0){
+      if((p->pend_signals & (2 << i)) != 0 && (((2 << i) & p->signals_mask) == 0)){
         if ((int)p->signals_handlers[i] == SIG_IGN){
           acquire(&ptable.lock);
           p->pend_signals = p->pend_signals ^ (2 << i);
