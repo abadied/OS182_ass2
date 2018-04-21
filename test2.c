@@ -17,6 +17,7 @@ main(int argc, char **argv)
     sleep(50);
     printf(2, "TAKE SIGNAL 4 MY SON!!!! %d\n", kill(pid, 4));
     printf(2, "TAKE SIGNAL 5 MY SON!!!! %d\n", kill(pid, 5));
+    sleep(70);
     printf(2, "CONTINUE MY SON!!!! %d\n", kill(pid, 19));
   	wait();
   	printf(2, "DONE\n");

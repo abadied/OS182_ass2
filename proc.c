@@ -173,11 +173,12 @@ userinit(void)
   // run this process. the acquire forces the above
   // writes to be visible, and the lock is also needed
   // because the assignment might not be atomic.
-  acquire(&ptable.lock);
+  pushcli();
 
+  // cas(&(p->state), p->state, RUNNABLE);
   p->state = RUNNABLE;
 
-  release(&ptable.lock);
+  popcli();
 }
 
 // Grow current process's memory by n bytes.
@@ -283,7 +284,8 @@ exit(void)
 
   //acquire(&ptable.lock);
   pushcli();
-  cas(&(curproc->state), curproc->state, MZOMBIE);
+  // cas(&(curproc->state), curproc->state, MZOMBIE);
+  curproc->state = MZOMBIE;
 
   // Parent might be sleeping in wait().
   wakeup1(curproc->parent);
@@ -299,6 +301,7 @@ exit(void)
 
   // Jump into the scheduler, never to return.
   // curproc->state = ZOMBIE;
+  // sleep(curproc, &ptable.lock);
   sched();
   panic("zombie exit");
 }
@@ -316,6 +319,8 @@ wait(void)
   for(;;){
 
     cas(&(curproc->state), RUNNING, MSLEEPING);
+
+    curproc->chan = (void *)curproc;
 
     // Scan through table looking for exited children.
     havekids = 0;
@@ -394,20 +399,12 @@ scheduler(void)
 
       cas(&(p->state), MSLEEPING, SLEEPING);
       cas(&(p->state), MRUNNABLE, RUNNABLE);
+      cas(&(p->state), MZOMBIE, ZOMBIE);
 
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
-
-      if (p->state == MZOMBIE){
-        kfree(p->kstack);
-        p->kstack = 0;
-        freevm(p->pgdir);
-        p->killed = 0;
-        p->chan = 0;
-      }
-      cas(&(p->state), MZOMBIE, ZOMBIE);
-
+      
     }
     popcli();
 
@@ -429,6 +426,7 @@ sched(void)
 
   // if(!holding(&ptable.lock))
   //   panic("sched ptable.lock");
+
   if(mycpu()->ncli != 1)
     panic("sched locks");
   if(p->state == RUNNING)
@@ -494,7 +492,8 @@ sleep(void *chan, struct spinlock *lk)
   release(lk);
   // Go to sleep.
   p->chan = chan;
-  cas(&(p->state), p->state, MSLEEPING);
+  // cas(&(p->state), p->state, MSLEEPING);
+  p->state = MSLEEPING;
 
   sched();
 
@@ -516,9 +515,10 @@ wakeup1(void *chan)
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->chan == chan){
-      if(cas(&p->state), MSLEEPING, MRUNNABLE)
+      if(cas(&(p->state), MSLEEPING, MRUNNABLE)){
         p->chan = 0;
-      if(cas(&p->state), SLEEPING, MRUNNABLE){
+      }
+      if(cas(&(p->state), SLEEPING, MRUNNABLE)){
         p->chan = 0;
         p->state = RUNNABLE;
       }
@@ -580,11 +580,19 @@ kill(int pid, int signum)
       }
       else if(signum == SIGCONT){
         if(p->stopped != 0){
-          p->pend_signals = p->pend_signals | (2 << SIGCONT);
+          int cur_signals, next_signals;
+          do{
+            cur_signals = p->pend_signals;
+            next_signals = p->pend_signals | (1 << SIGCONT);
+          } while(!cas(&(p->pend_signals), cur_signals, next_signals));
         }
       }
       else{
-        p->pend_signals = p->pend_signals | (2 << signum);
+        int cur_signals, next_signals;
+        do{
+          cur_signals = p->pend_signals;
+          next_signals = p->pend_signals | (1 << signum);
+        } while(!cas(&(p->pend_signals), cur_signals, next_signals));
       }
       popcli();
       return 0;
@@ -664,33 +672,39 @@ handle_signal(struct trapframe* tf){
   }
 
   /** check for the users privates **/
-  if (tf->cs & 3 != DPL_USER)
+  if ((tf->cs & 3) != DPL_USER)
+    return;
+
+  if (!cas(&(p->handling_signal), 0, 1))
     return;
 
   while(p->stopped != 0){
-    if(p->pend_signals & (2 << SIGCONT)){
+    if(p->pend_signals & (1 << SIGCONT)){
       p->stopped = 0;
-      acquire(&ptable.lock);
-      p->pend_signals = p->pend_signals ^ (2 << SIGCONT);
-      release(&ptable.lock);
+      pushcli();
+      int cur_signals, next_signals;
+      do{
+        cur_signals = p->pend_signals;
+        next_signals = p->pend_signals ^ (1 << SIGCONT);
+      } while(!cas(&(p->pend_signals), cur_signals, next_signals));
+      popcli();
     }
     else{
       yield();
     }
   }
 
-  pushcli();
-  if(!cas(&(p->handling_signal), 0, 1)){
-    popcli();
-    return;
-  }
-
   if(p->pend_signals != 0){
+    pushcli();
     int sig = -1;
     for(int i = 0; i < 32; i++){
-      if((p->pend_signals & (2 << i)) != 0 && (((2 << i) & p->signals_mask) == 0)){
+      if((p->pend_signals & (1 << i)) != 0 && (((1 << i) & p->signals_mask) == 0)){
         if ((int)p->signals_handlers[i] == SIG_IGN){
-          p->pend_signals = p->pend_signals ^ (2 << i);
+          int cur_signals, next_signals;
+          do{
+            cur_signals = p->pend_signals;
+            next_signals = p->pend_signals ^ (1 << i);
+          } while(!cas(&(p->pend_signals), cur_signals, next_signals));
           continue;
         }
         sig = i;
@@ -698,17 +712,24 @@ handle_signal(struct trapframe* tf){
       }
     }
     if(sig < 0){
+      p->handling_signal = 0;
       popcli();
       return;
     }
 
-    p->pend_signals = p->pend_signals ^ (2 << sig);
+
+    int cur_signals, next_signals;
+    do{
+      cur_signals = p->pend_signals;
+      next_signals = p->pend_signals ^ (1 << sig);
+    } while(!cas(&(p->pend_signals), cur_signals, next_signals));
 
     popcli();
 
     void* sig_handler = p->signals_handlers[sig];
     if ((int)sig_handler == SIG_DFL){
       kill(p->pid, SIGKILL);
+      p->handling_signal = 0;
     }
     else{
       p->user_tf_backup = *(p->tf);
@@ -729,6 +750,9 @@ handle_signal(struct trapframe* tf){
     }
     
   }
+  else{
+    p->handling_signal = 0;
+  }
   return;
 }
 
@@ -740,9 +764,7 @@ sigret(void){
     panic("should not be here");
 
   *(p->tf) = p->user_tf_backup;
-  pushcli();
-  cas(&(p->handling_signal), 1, 0);
-  popcli();
+  p->handling_signal = 0;
 
   return;
 }
