@@ -26,6 +26,7 @@ main(int argc, char **argv)
     printf(2, "setting signal handler %d\n", signal(3, (sighandler_t)sig_hand));
     printf(2, "setting signal handler %d\n", signal(4, (sighandler_t)sig_hand));
     printf(2, "setting signal handler %d\n", signal(5, (sighandler_t)sig_hand));
+    printf(2, "setting sigmask %d\n", sigprocmask(1<<4));
   	printf(2, "IM THE SON AND MY ID IS %d\n", getpid());
   	for(int i=0 ; i < 10 ; i++) {
   		sleep(50);
