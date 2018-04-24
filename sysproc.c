@@ -126,7 +126,7 @@ sys_signal(void){
     return -1;
 
   if(signum >= 32 || signum < 0)
-    return -1;
+    return -2;
 
   return (int)signal(signum, handler);
 }

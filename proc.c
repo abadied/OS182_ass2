@@ -567,7 +567,7 @@ kill(int pid, int signum)
   pushcli();
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->pid == pid){
-      if(signum == SIGKILL){
+      if(signum == SIGKILL && p->signals_handlers[SIGKILL] == SIG_DFL){
         p->killed = 1;
         // Wake process from sleep if necessary.
         if(p->state == SLEEPING)
@@ -575,10 +575,10 @@ kill(int pid, int signum)
         if(p->state == MSLEEPING)
           cas(&(p->state), MSLEEPING, MRUNNABLE);
       }
-      else if(signum == SIGSTOP){
+      else if(signum == SIGSTOP && p->signals_handlers[SIGSTOP] == SIG_DFL){
         p->stopped = 1;
       }
-      else if(signum == SIGCONT){
+      else if(signum == SIGCONT && p->signals_handlers[SIGCONT] == SIG_DFL){
         if(p->stopped != 0){
           int cur_signals, next_signals;
           do{
@@ -679,7 +679,7 @@ handle_signal(struct trapframe* tf){
     return;
 
   while(p->stopped != 0){
-    if(p->pend_signals & (1 << SIGCONT)){
+    if(p->pend_signals & (1 << SIGCONT) && p->signals_handlers[SIGCONT] == SIG_DFL){
       p->stopped = 0;
       pushcli();
       int cur_signals, next_signals;
